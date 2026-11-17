@@ -5,13 +5,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using OrchardCore.DisplayManagement.ModelBinding;
-using OrchardCore.Json;
 using OrchardCore.Navigation;
-using OrchardCore.Users.Models;
 using OrchardCore.Users.Services;
 using OrchardCore.Users.ViewModels;
-using YesSql.Filters.Query;
-using YesSql.Filters.Query.Services;
 
 namespace CrestApps.OrchardCore.AI.Agent.Users;
 
@@ -29,7 +25,7 @@ public sealed class SearchForUsersTool : AIFunction
       "properties": {
         "term": {
           "type": "string",
-          "description": "The query string to search for."
+          "description": "The text to look for in user names. The search syntax of the Users admin list is supported, for example 'email:jane@example.com' or 'role:Editor'."
         },
         "pageNumber": {
           "type": "integer",
@@ -47,7 +43,7 @@ public sealed class SearchForUsersTool : AIFunction
 
     public override string Name => TheName;
 
-    public override string Description => "Search for users that match the given query along with a way to paginate the results.";
+    public override string Description => "Search for users whose user name contains the given term, along with a way to paginate the results.";
 
     public override JsonElement JsonSchema => _jsonSchema;
 
@@ -69,9 +65,9 @@ public sealed class SearchForUsersTool : AIFunction
         }
 
         var usersAdminListQueryService = arguments.Services.GetRequiredService<IUsersAdminListQueryService>();
+        var usersAdminListFilterParser = arguments.Services.GetRequiredService<IUsersAdminListFilterParser>();
         var updateModelAccessor = arguments.Services.GetRequiredService<IUpdateModelAccessor>();
 
-        var options = arguments.Services.GetRequiredService<IOptions<DocumentJsonSerializerOptions>>().Value;
         var pagerOptions = arguments.Services.GetRequiredService<IOptions<PagerOptions>>().Value;
 
         if (!arguments.TryGetFirstString("term", out var term))
@@ -90,17 +86,24 @@ public sealed class SearchForUsersTool : AIFunction
 
         var startingIndex = (page - 1) * pagerOptions.PageSize;
 
-        var query = await usersAdminListQueryService.QueryAsync(new UserIndexOptions()
+        // The Users admin list query runs the parsed filter only, so the term is parsed the way that list parses its search box.
+        var filterResult = usersAdminListFilterParser.Parse(term);
+
+        var options = new UserIndexOptions()
         {
             SearchText = term,
             OriginalSearchText = term,
             StartIndex = startingIndex,
-            FilterResult = new QueryFilterResult<User>(new Dictionary<string, QueryTermOption<User>>()),
-        }, updateModelAccessor.ModelUpdater);
+            FilterResult = filterResult,
+        };
 
-        var contentItemsCount = await query.CountAsync(cancellationToken);
+        filterResult.MapTo(options);
 
-        var contentItems = await query.Skip(startingIndex)
+        var query = await usersAdminListQueryService.QueryAsync(options, updateModelAccessor.ModelUpdater);
+
+        var usersCount = await query.CountAsync(cancellationToken);
+
+        var users = await query.Skip(startingIndex)
             .Take(pagerOptions.PageSize)
             .ListAsync(cancellationToken);
 
@@ -112,9 +115,9 @@ public sealed class SearchForUsersTool : AIFunction
         return
         $$"""
 {
-"users": {{JsonSerializer.Serialize(contentItems, options.SerializerOptions)}},
-"usersCount": {{contentItemsCount}},
-"totalPages": {{Math.Ceiling((double)contentItemsCount / pagerOptions.PageSize)}},
+"users": {{JsonSerializer.Serialize(users.Select(user => user.AsAIObject()))}},
+"usersCount": {{usersCount}},
+"totalPages": {{Math.Ceiling((double)usersCount / pagerOptions.PageSize)}},
 "pageSize": {{pagerOptions.PageSize}}
 }
 """;

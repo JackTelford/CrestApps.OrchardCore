@@ -92,7 +92,7 @@ With the **AI Quality** feature on, the admin AI agent can also look at QA resul
 
 | Function | Description |
 | --- | --- |
-| `searchForContentItems` | Searches for content items. |
+| `searchForContentItems` | Searches the titles of the content items the current user may view, latest versions only. The term takes the search syntax of the **Content Items** admin list, such as `type:Article` or `status:Draft`. It needs a user's request, so it is not available in a background task. |
 | `getSampleContentItemForContentType` | Generates a structured sample content item for a specified content type. |
 | `getContentItemSchema` | Returns the current content-item JSON schema for one or more Orchard Core content types. Call it immediately before `createOrUpdateContentItem` whenever that tool is available. |
 | `publishContentItem` | Publishes a draft or previously unpublished content item. |
@@ -160,7 +160,7 @@ When `createOrUpdateContentItem` is available alongside recipe-backed content sc
 | Function | Required feature | Description |
 | --- | --- | --- |
 | `getUserInfo` | `OrchardCore.Users` | Gets information about a user. |
-| `searchForUsers` | `OrchardCore.Users` | Searches the system for users. |
+| `searchForUsers` | `OrchardCore.Users` | Searches users by user name. The term takes the search syntax of the **Users** admin list, such as `email:jane@example.com` or `role:Editor`. |
 | `getRoleInfo` | `OrchardCore.Roles` | Gets information about a role. |
 
 ### Workflow tools

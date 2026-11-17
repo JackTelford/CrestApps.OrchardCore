@@ -1,5 +1,6 @@
 using System.Text.Json;
 using CrestApps.Core.AI.Extensions;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -10,8 +11,6 @@ using OrchardCore.Contents.ViewModels;
 using OrchardCore.DisplayManagement.ModelBinding;
 using OrchardCore.Json;
 using OrchardCore.Navigation;
-using YesSql.Filters.Query;
-using YesSql.Filters.Query.Services;
 
 namespace CrestApps.OrchardCore.AI.Agent.Contents;
 
@@ -29,7 +28,7 @@ public sealed class SearchForContentsTool : AIFunction
       "properties": {
         "term": {
           "type": "string",
-          "description": "The query string to search for."
+          "description": "The text to look for in content item titles. The search syntax of the Content Items admin list is supported, for example 'type:Article' or 'status:Draft'."
         },
         "pageNumber": {
           "type": "integer",
@@ -46,7 +45,7 @@ public sealed class SearchForContentsTool : AIFunction
 
     public override string Name => TheName;
 
-    public override string Description => "Search for content items that match the given query along with a way to paginate the results.";
+    public override string Description => "Search for content items whose title contains the given term, along with a way to paginate the results.";
 
     public override JsonElement JsonSchema => _jsonSchema;
 
@@ -70,7 +69,9 @@ public sealed class SearchForContentsTool : AIFunction
 
         var contentManager = arguments.Services.GetRequiredService<IContentManager>();
         var contentsAdminListQueryService = arguments.Services.GetRequiredService<IContentsAdminListQueryService>();
+        var contentsAdminListFilterParser = arguments.Services.GetRequiredService<IContentsAdminListFilterParser>();
         var updateModelAccessor = arguments.Services.GetRequiredService<IUpdateModelAccessor>();
+        var httpContextAccessor = arguments.Services.GetRequiredService<IHttpContextAccessor>();
 
         var options = arguments.Services.GetRequiredService<IOptions<DocumentJsonSerializerOptions>>().Value;
         var pagerOptions = arguments.Services.GetRequiredService<IOptions<PagerOptions>>().Value;
@@ -82,17 +83,32 @@ public sealed class SearchForContentsTool : AIFunction
             return "Unable to find a term argument in the function arguments.";
         }
 
+        // The filters of the Content Items admin list read the user of the current request to keep what that user may view.
+        if (httpContextAccessor.HttpContext is null)
+        {
+            logger.LogWarning("AI tool '{ToolName}': HttpContext is null (likely running in a background task). The content items a user may view cannot be resolved.", TheName);
+
+            return "Content items can only be searched during a user's request. This function is not available in a background task.";
+        }
+
         var page = arguments.GetFirstValueOrDefault("pageNumber", 1);
 
         var startingIndex = (Math.Max(1, page) - 1) * pagerOptions.PageSize;
 
-        var query = await contentsAdminListQueryService.QueryAsync(new ContentOptionsViewModel()
+        // The Content Items admin list query runs the parsed filter only, so the term is parsed the way that list parses its search box.
+        var filterResult = contentsAdminListFilterParser.Parse(term);
+
+        var contentOptions = new ContentOptionsViewModel()
         {
             SearchText = term,
             OriginalSearchText = term,
             StartIndex = startingIndex,
-            FilterResult = new QueryFilterResult<ContentItem>(new Dictionary<string, QueryTermOption<ContentItem>>()),
-        }, updateModelAccessor.ModelUpdater);
+            FilterResult = filterResult,
+        };
+
+        filterResult.MapTo(contentOptions);
+
+        var query = await contentsAdminListQueryService.QueryAsync(contentOptions, updateModelAccessor.ModelUpdater);
 
         var contentItemsCount = await query.CountAsync(cancellationToken);
 
