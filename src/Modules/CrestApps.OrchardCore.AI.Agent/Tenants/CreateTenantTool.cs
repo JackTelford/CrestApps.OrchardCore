@@ -136,6 +136,8 @@ public sealed class CreateTenantTool : AIFunction
         newShellSettings.Name = name;
         newShellSettings["DatabaseProvider"] = databaseProvider;
 
+        // Like the Tenants admin, give the tenant a secret so its setup screen asks for a setup token.
+        newShellSettings["Secret"] = Guid.NewGuid().ToString();
         newShellSettings["RecipeName"] = recipeName;
 
         if (arguments.TryGetFirstString("requestUrlHost", out var requestUrlHost))
